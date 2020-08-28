@@ -3,8 +3,10 @@ package mysqldump
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"text/template"
 	"time"
@@ -129,6 +131,8 @@ func (d *Dumper) Dump() (string, error) {
 func getTables(db *sql.DB) ([]string, error) {
 	tables := make([]string, 0)
 
+	var ignoretables = []string{"user_regulatory", "user_job_history", "mimic_log", "shifts_new", "acc_nurse_rates_copy", "archive_shift_notices", "archive_user_timesheets", "archived_msg_receivers", "archived_msgs", "archived_notifications", "req_user_fields_copy", "shift_applicants_copy", "shift_features_copy", "schema_migrations_old", "nurse_last_worked_applied", "users_before_activation_date", "shift_applicant_copy", "user_last_seen_copy", "user_preferences_backup", "organization_features_old", "organization_locations_old"}
+
 	// Get table list
 	rows, err := db.Query("SHOW TABLES")
 	if err != nil {
@@ -140,11 +144,30 @@ func getTables(db *sql.DB) ([]string, error) {
 	for rows.Next() {
 		var table sql.NullString
 		if err := rows.Scan(&table); err != nil {
+			log.Println("err in getTables()=====", err)
 			return tables, err
 		}
-		tables = append(tables, table.String)
+		if !tableExists(ignoretables, table.String) {
+			tables = append(tables, table.String)
+		}
 	}
 	return tables, rows.Err()
+}
+
+func tableExists(slice interface{}, item interface{}) bool {
+	s := reflect.ValueOf(slice)
+
+	if s.Kind() != reflect.Slice {
+		panic("Invalid data-type")
+	}
+
+	for i := 0; i < s.Len(); i++ {
+		if s.Index(i).Interface() == item {
+			return true
+		}
+	}
+
+	return false
 }
 
 func getServerVersion(db *sql.DB) (string, error) {
@@ -174,7 +197,10 @@ func createTableSQL(db *sql.DB, name string) (string, error) {
 	// Get table creation SQL
 	var table_return sql.NullString
 	var table_sql sql.NullString
+
+	log.Println("Table Name=====", name)
 	err := db.QueryRow("SHOW CREATE TABLE "+name).Scan(&table_return, &table_sql)
+	log.Println("err=====", err)
 
 	if err != nil {
 		return "", err
@@ -226,7 +252,7 @@ func createTableValues(db *sql.DB, name string) (string, error) {
 
 		for key, value := range data {
 			if value != nil && value.Valid {
-				dataStrings[key] = "'" + value.String + "'"
+				dataStrings[key] = "'" + strings.Replace(value.String, "'", "\\'", -1) + "'"
 			} else {
 				dataStrings[key] = "null"
 			}
